@@ -110,6 +110,63 @@ public class MysqlConnUtil {
          return expressionMap;
     }
 
+
+    public static Map<String,ExpressObjMini> getParseParamConfMini(String sql) throws Exception{
+
+
+        Connection conn = cpds.getConnection();
+        Statement statement = conn.createStatement();
+        ResultSet resultSet = statement.executeQuery(sql);
+
+        final int ruleIdentityColumn = resultSet.findColumn("ruleIdentity");
+        final int nameColumn = resultSet.findColumn("name");
+        final int modelIdentitiesColumn = resultSet.findColumn("modelIdentities");
+        final int formulaColumn = resultSet.findColumn("formula");
+        final int beginTimeThresholdSecondColumn = resultSet.findColumn("beginTimeThresholdSecond");
+        final int endTimeThresholdSecondColumn = resultSet.findColumn("endTimeThresholdSecond");
+        Map<String,ExpressObjMini> expressionMap = new HashMap();
+
+        while(resultSet.next()){
+            try {
+                final String ruleIdentity = resultSet.getString(ruleIdentityColumn);
+                if (StringUtils.isBlank(ruleIdentity)) {
+                    continue;
+                }
+
+                final String name = resultSet.getString(nameColumn);
+
+
+                String modelIdentitiesColumnStr = resultSet.getString(modelIdentitiesColumn);
+                String[] modelIdentitiesArr = parseModelIdentity(modelIdentitiesColumnStr);
+
+                final String formula = resultSet.getString(formulaColumn);
+                if (StringUtils.isBlank(formula)) {
+
+                    continue;
+                }
+                final String expression = resultSet.getString(formulaColumn);
+
+                final int beginTimeThresholdSecond = resultSet.getInt(beginTimeThresholdSecondColumn);
+                if (beginTimeThresholdSecond < 0) {
+                    log.warn("参数报警规则 RULE_ID:{} ROLE_NAME:{} 开始时间阈值[{}]小于0", ruleIdentity, name, beginTimeThresholdSecond);
+                }
+                final int endTimeThresholdSecond = resultSet.getInt(endTimeThresholdSecondColumn);
+                if (endTimeThresholdSecond < 0) {
+                    log.warn("参数报警规则 RULE_ID:{} ROLE_NAME:{} 结束时间阈值[{}]小于0", ruleIdentity, name, endTimeThresholdSecond);
+                }
+                ExpressObjMini expressObj = new ExpressObjMini(ruleIdentity, name, modelIdentitiesArr, expression, beginTimeThresholdSecond, endTimeThresholdSecond);
+
+                expressionMap.put(ruleIdentity,expressObj);
+            }catch(Exception e){
+                e.printStackTrace();
+            }
+
+        }
+
+        conn.close();
+        return expressionMap;
+    }
+
     private static String[] parseModelIdentity(String modelIdentitiesColumn){
         if(StringUtils.isNotBlank(modelIdentitiesColumn)){
             return modelIdentitiesColumn.split(",");
@@ -164,6 +221,72 @@ public class MysqlConnUtil {
 
         public int getEndTimeThresholdSecond() {
             return endTimeThresholdSecond;
+        }
+    }
+
+    public static class ExpressObjMini{
+
+        private ExpressObjMini(String ruleIdentity,String name,String[] modelIdentitiesArr,String expression,int beginTimeThresholdSecond,int endTimeThresholdSecond){
+            this.ruleIdentity = ruleIdentity;
+            this.name = name;
+            this.modelIdentitiesArr = modelIdentitiesArr;
+            this.expression = expression;
+            this.beginTimeThresholdSecond = beginTimeThresholdSecond;
+            this.endTimeThresholdSecond = endTimeThresholdSecond;
+        }
+        private String ruleIdentity;
+        private String name;
+        private String[] modelIdentitiesArr;
+        private String expression;
+        private int beginTimeThresholdSecond;
+        private int endTimeThresholdSecond;
+
+        public String getRuleIdentity() {
+            return ruleIdentity;
+        }
+
+        public void setRuleIdentity(String ruleIdentity) {
+            this.ruleIdentity = ruleIdentity;
+        }
+
+        public String getName() {
+            return name;
+        }
+
+        public void setName(String name) {
+            this.name = name;
+        }
+
+        public String[] getModelIdentitiesArr() {
+            return modelIdentitiesArr;
+        }
+
+        public void setModelIdentitiesArr(String[] modelIdentitiesArr) {
+            this.modelIdentitiesArr = modelIdentitiesArr;
+        }
+
+        public String getExpression() {
+            return expression;
+        }
+
+        public void setExpression(String expression) {
+            this.expression = expression;
+        }
+
+        public int getBeginTimeThresholdSecond() {
+            return beginTimeThresholdSecond;
+        }
+
+        public void setBeginTimeThresholdSecond(int beginTimeThresholdSecond) {
+            this.beginTimeThresholdSecond = beginTimeThresholdSecond;
+        }
+
+        public int getEndTimeThresholdSecond() {
+            return endTimeThresholdSecond;
+        }
+
+        public void setEndTimeThresholdSecond(int endTimeThresholdSecond) {
+            this.endTimeThresholdSecond = endTimeThresholdSecond;
         }
     }
 
