@@ -68,7 +68,7 @@ public class KafkaConsumer {
                 "ldx_flink_test_topic",
                 new SimpleStringSchema(),
                 props
-        ));
+        )).setParallelism(3);
 
 
         SingleOutputStreamOperator<Tuple2<String, Map<String, String>>> mapOutputStream = dataStreamSource.map(new MapFunction<String, Tuple2<String, Map<String, String>>>() {
@@ -89,19 +89,19 @@ public class KafkaConsumer {
                     return new Tuple2<String, Map<String, String>>(null, null);
                 }
             }
-        }).filter(new FilterFunction<Tuple2<String, Map<String, String>>>() {
+        }).setParallelism(3).filter(new FilterFunction<Tuple2<String, Map<String, String>>>() {
             public boolean filter(Tuple2<String, Map<String, String>> value) throws Exception {
                 return StringUtils.isNotBlank(value.f0) && value.f1 != null;
             }
-        });
+        }).setParallelism(3);
 
         //TODO 处理多项报警信息
 
         //TODO 1.3801字段报警
-        SingleOutputStreamOperator alarm3801 = mapOutputStream.keyBy(0).process(new Alarm3801Status()).uid("state_uid_3801");
+        SingleOutputStreamOperator alarm3801 = mapOutputStream.keyBy(0).process(new Alarm3801Status()).uid("state_uid_3801").setParallelism(3);
 
         //TODO 2.GPS异常报警
-        SingleOutputStreamOperator alarmGps = mapOutputStream.keyBy(0).flatMap(new RichFlatMapFunction<Tuple2<String, Map<String, String>>, String>() {
+        /*SingleOutputStreamOperator alarmGps = mapOutputStream.keyBy(0).flatMap(new RichFlatMapFunction<Tuple2<String, Map<String, String>>, String>() {
 
             private ValueState<AlarmInfo> valueState;
 
@@ -135,9 +135,9 @@ public class KafkaConsumer {
                 }
 
             }
-        }).uid("state_uid_gsp_exception");
+        }).uid("state_uid_gsp_exception");*/
         alarm3801.print();
-        alarmGps.print();
+        //alarmGps.print();
 
         env.execute();
     }
@@ -165,50 +165,27 @@ public class KafkaConsumer {
                 for(Map.Entry<String,MysqlConnUtil.ExpressObj> entry : expressionMap.entrySet()){
                     String mapKey = vid+"_"+entry.getKey();
                     boolean isAlarm = ExpressUtil.isMeetExpression(entry.getValue().getExpression(), dataMap);
+                    long currentTs = System.currentTimeMillis();
                     if(isAlarm){
                         if(!mapState.contains(mapKey)){
-                          StateTemporaryStore sts =   temporaryStoreMap.get(mapKey);
-                            long currentTs = System.currentTimeMillis();
-                          if(sts == null){
-                               sts = new StateTemporaryStore();
-                               sts.setFirstTs(currentTs);
-                               if((currentTs-sts.getFirstTs()) >= entry.getValue().getBeginTimeThresholdSecond()*1000){
-                                   //触发报警
-                                  AlarmInfo alarmInfo =  buildAlarmInfo(mapKey,entry.getValue().getName(),"begin");
-                                  mapState.put(mapKey,alarmInfo);
-                                  collector.collect(alarmInfo.getMsg());
-
-                               }else{
-                                   sts.setAlarmState("begin");
-                                   temporaryStoreMap.put(mapKey,sts);
-                               }
-                          }else if("end".equals(sts.getAlarmState())){
-                               sts.setFirstTs(currentTs);
-                               sts.setAlarmState("begin");
-                          }else if("begin".equals(sts.getAlarmState())){
-                              if((currentTs-sts.getFirstTs()) >= entry.getValue().getBeginTimeThresholdSecond()*1000){
-                                  //触发报警
-                                  AlarmInfo alarmInfo =  buildAlarmInfo(mapKey,entry.getValue().getName(),"begin");
-                                  mapState.put(mapKey,alarmInfo);
-                                  collector.collect(alarmInfo.getMsg());
-                                  //临时存储map去掉对应的key
-                                  temporaryStoreMap.remove(mapKey);
-                              }
-                          }
+                          handleAlarm(mapKey,currentTs,entry.getValue().getName(),"begin",temporaryStoreMap,mapState,collector);
+                        }else{
+                            temporaryStoreMapUpdate(mapKey,currentTs,"begin");
                         }
                     }else{
-                       if(mapState.contains(mapKey)){ //一针触发结束报警
-                           //触发结束报警的消息
-                           AlarmInfo alarmInfo =  buildAlarmInfo(mapKey,entry.getValue().getName(),"end");
-                           collector.collect(alarmInfo.getMsg());
-                           mapState.remove(mapKey);
-
+                       if(mapState.contains(mapKey)){
+                           handleAlarm(mapKey,currentTs,entry.getValue().getName(),"end",temporaryStoreMap,mapState,collector);
+                       }else{
+                           temporaryStoreMapUpdate(mapKey,currentTs,"end");
                        }
                     }
+
                 }
 
 
             }
+
+
 
         }
 
@@ -226,6 +203,61 @@ public class KafkaConsumer {
             });
 
             return finalMap;
+        }
+
+        private void handleAlarm(String mapKey,long currentTs,String alarmName,String alarmStatus ,Map<String, StateTemporaryStore> temporaryStoreMap,MapState<String, AlarmInfo> mapState,Collector<String> collector) throws Exception{
+            StateTemporaryStore sts = temporaryStoreMap.get(mapKey);
+            if(sts != null && alarmStatus.equals(sts.getAlarmState())){
+                sts.setCurrentTs(currentTs);
+                sts.setCurrentTs(sts.getCount()+1);
+                if(isAlarmStartEndThreshold(sts,3000,3)){
+                    alarmStartEndOpe(mapKey,alarmName,alarmStatus,temporaryStoreMap,mapState,collector);
+                }
+            }else{
+                boolean isOriStsIsNull = false;
+                if(sts == null){
+                    isOriStsIsNull = true;
+                }
+                initStateTemporaryStore(sts,currentTs,1,alarmStatus);
+                if(isOriStsIsNull){
+                    temporaryStoreMap.put(mapKey,sts);
+                }
+                if(isAlarmStartEndThreshold(sts,3000,3)){
+                    alarmStartEndOpe(mapKey,alarmName,alarmStatus,temporaryStoreMap,mapState,collector);
+                }
+            }
+        }
+
+        private void temporaryStoreMapUpdate(String mapKey,long currentTs,String alarmStatus){
+            StateTemporaryStore sts =  temporaryStoreMap.get(mapKey);
+            if(sts != null && !alarmStatus.equals(sts.getAlarmState())){
+                initStateTemporaryStore(sts,currentTs,1,alarmStatus);
+            }
+        }
+
+        private void alarmStartEndOpe(String mapKey,String alarmName,String alarmStatus ,Map<String, StateTemporaryStore> temporaryStoreMap,MapState<String, AlarmInfo> mapState,Collector<String> collector) throws Exception{
+            AlarmInfo alarmInfo =  buildAlarmInfo(mapKey,alarmName,alarmStatus);
+            mapState.put(mapKey,alarmInfo);
+            collector.collect(alarmInfo.getMsg());
+            //临时存储map去掉对应的key
+            temporaryStoreMap.remove(mapKey);
+        }
+
+        private boolean isAlarmStartEndThreshold(StateTemporaryStore sts,long continueTime,int continueCount){
+            if(sts.getCount()-sts.getFirstTs() >= continueCount && sts.getCount() >= continueCount){
+                return true;
+            }
+            return false;
+        }
+        private void  initStateTemporaryStore(StateTemporaryStore sts,long firstTs,int count,String alarmStatus){
+            if(sts == null){
+                sts = new StateTemporaryStore();
+            }
+            sts.setFirstTs(firstTs);
+            sts.setCurrentTs(firstTs);
+            sts.setCount(count);
+            sts.setAlarmState(alarmStatus);
+
         }
 
         private AlarmInfo buildAlarmInfo(String alarmMsg,String alarmName,String alarmStatus){
