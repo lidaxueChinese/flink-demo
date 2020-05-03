@@ -209,7 +209,7 @@ public class KafkaConsumer {
             StateTemporaryStore sts = temporaryStoreMap.get(mapKey);
             if(sts != null && alarmStatus.equals(sts.getAlarmState())){
                 sts.setCurrentTs(currentTs);
-                sts.setCurrentTs(sts.getCount()+1);
+                sts.setCount(sts.getCount()+1);
                 if(isAlarmStartEndThreshold(sts,3000,3)){
                     alarmStartEndOpe(mapKey,alarmName,alarmStatus,temporaryStoreMap,mapState,collector);
                 }
@@ -218,7 +218,7 @@ public class KafkaConsumer {
                 if(sts == null){
                     isOriStsIsNull = true;
                 }
-                initStateTemporaryStore(sts,currentTs,1,alarmStatus);
+                sts = initStateTemporaryStore(sts,currentTs,1,alarmStatus);
                 if(isOriStsIsNull){
                     temporaryStoreMap.put(mapKey,sts);
                 }
@@ -237,19 +237,23 @@ public class KafkaConsumer {
 
         private void alarmStartEndOpe(String mapKey,String alarmName,String alarmStatus ,Map<String, StateTemporaryStore> temporaryStoreMap,MapState<String, AlarmInfo> mapState,Collector<String> collector) throws Exception{
             AlarmInfo alarmInfo =  buildAlarmInfo(mapKey,alarmName,alarmStatus);
-            mapState.put(mapKey,alarmInfo);
+            if("begin".equals(alarmStatus)){
+                mapState.put(mapKey,alarmInfo);
+            }else if("end".equals(alarmStatus)){
+                mapState.remove(mapKey);
+            }
             collector.collect(alarmInfo.getMsg());
             //临时存储map去掉对应的key
             temporaryStoreMap.remove(mapKey);
         }
 
         private boolean isAlarmStartEndThreshold(StateTemporaryStore sts,long continueTime,int continueCount){
-            if(sts.getCount()-sts.getFirstTs() >= continueCount && sts.getCount() >= continueCount){
+            if(sts.getCurrentTs()-sts.getFirstTs() >= continueTime && sts.getCount() >= continueCount){
                 return true;
             }
             return false;
         }
-        private void  initStateTemporaryStore(StateTemporaryStore sts,long firstTs,int count,String alarmStatus){
+        private StateTemporaryStore  initStateTemporaryStore(StateTemporaryStore sts,long firstTs,int count,String alarmStatus){
             if(sts == null){
                 sts = new StateTemporaryStore();
             }
@@ -257,7 +261,7 @@ public class KafkaConsumer {
             sts.setCurrentTs(firstTs);
             sts.setCount(count);
             sts.setAlarmState(alarmStatus);
-
+            return sts;
         }
 
         private AlarmInfo buildAlarmInfo(String alarmMsg,String alarmName,String alarmStatus){
