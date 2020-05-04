@@ -168,13 +168,13 @@ public class KafkaConsumer {
                     long currentTs = System.currentTimeMillis();
                     if(isAlarm){
                         if(!mapState.contains(mapKey)){
-                          handleAlarm(mapKey,currentTs,entry.getValue().getName(),"begin",temporaryStoreMap,mapState,collector);
+                          handleAlarm(mapKey,currentTs,entry.getValue().getName(),"begin",collector);
                         }else{
                             temporaryStoreMapUpdate(mapKey,currentTs,"begin");
                         }
                     }else{
                        if(mapState.contains(mapKey)){
-                           handleAlarm(mapKey,currentTs,entry.getValue().getName(),"end",temporaryStoreMap,mapState,collector);
+                           handleAlarm(mapKey,currentTs,entry.getValue().getName(),"end",collector);
                        }else{
                            temporaryStoreMapUpdate(mapKey,currentTs,"end");
                        }
@@ -205,13 +205,13 @@ public class KafkaConsumer {
             return finalMap;
         }
 
-        private void handleAlarm(String mapKey,long currentTs,String alarmName,String alarmStatus ,Map<String, StateTemporaryStore> temporaryStoreMap,MapState<String, AlarmInfo> mapState,Collector<String> collector) throws Exception{
+        private void handleAlarm(String mapKey,long currentTs,String alarmName,String alarmStatus,Collector<String> collector) throws Exception{
             StateTemporaryStore sts = temporaryStoreMap.get(mapKey);
             if(sts != null && alarmStatus.equals(sts.getAlarmState())){
                 sts.setCurrentTs(currentTs);
                 sts.setCount(sts.getCount()+1);
                 if(isAlarmStartEndThreshold(sts,3000,3)){
-                    alarmStartEndOpe(mapKey,alarmName,alarmStatus,temporaryStoreMap,mapState,collector);
+                    alarmStartEndOpe(mapKey,alarmName,alarmStatus,collector);
                 }
             }else{
                 boolean isOriStsIsNull = false;
@@ -223,7 +223,7 @@ public class KafkaConsumer {
                     temporaryStoreMap.put(mapKey,sts);
                 }
                 if(isAlarmStartEndThreshold(sts,3000,3)){
-                    alarmStartEndOpe(mapKey,alarmName,alarmStatus,temporaryStoreMap,mapState,collector);
+                    alarmStartEndOpe(mapKey,alarmName,alarmStatus,collector);
                 }
             }
         }
@@ -235,7 +235,7 @@ public class KafkaConsumer {
             }
         }
 
-        private void alarmStartEndOpe(String mapKey,String alarmName,String alarmStatus ,Map<String, StateTemporaryStore> temporaryStoreMap,MapState<String, AlarmInfo> mapState,Collector<String> collector) throws Exception{
+        private void alarmStartEndOpe(String mapKey,String alarmName,String alarmStatus,Collector<String> collector) throws Exception{
             AlarmInfo alarmInfo =  buildAlarmInfo(mapKey,alarmName,alarmStatus);
             if("begin".equals(alarmStatus)){
                 mapState.put(mapKey,alarmInfo);
